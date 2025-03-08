@@ -135,45 +135,67 @@ class FCN_QNet(nn.Module):
             out = self.forward(obs)
             return out.argmax().item()
 
-def train(q, q_target, memory, optimizer):
+def train(writer, n_episode, q, q_target, memory, optimizer, double = 0):
     """
     core algorithm of Deep Q-learning
 
     do this training once per evaluation of the environment
     run evaluation once and train X times
     """
-    for i in range(train_times):
-        # sample from memory, which is not from the most recent runs
-        # but from all previous runs in the memory, so you can be
-        # more sample efficient, because you continuously learn from
-        # past situations
-        # key advantage of Off-policy
-        s,a,r,s_prime,done_mask = memory.sample(batch_size)
-        # the torch size is [batch_size, rows, cols], ie batch_first
-        # print("DQN train --> s.size = ", s.size())
-        # print(s)
-        # print("DQN train --> r.size = ", r.size())
-        # print(r)
+    if double:
+        for i in range(train_times):
+            s, a, r, s_prime, done_mask = memory.sample(batch_size)
 
-        # forward once to q
-        q_out = q(s)
-        q_a = q_out.gather(1,a)
-        # forward another time for q_target
-        max_q_prime = q_target(s_prime).max(1)[0].unsqueeze(1)
-        # calculate the target value
-        # if environment is done, there is no future reward,
-        # mask the final step reward with done_mask (0.0 if done else 1.0)
-        target = r + gamma * max_q_prime * done_mask
-        # L1 loss but smoothed out a bit
-        loss = F.smooth_l1_loss(q_a, target)
-        # we will try to improve on Q(s,a)
-        # how well our Q-function is at guessing the future long-term rewards
-        # Q_targ() is the target Q network, a 2nd NN to stablize training
-        # Q(s,a) = R(s,a) + γ*Q_targ(s_prime)*done_mask
-        optimizer.zero_grad()
-        loss.backward()
-        # clip the policy_net.parameters()
-        # Dec05 2021 found it did not work...
-        # for param in q.parameters():
-        #     param.grad.data.clamp_(-1, 1)
-        optimizer.step()
+            q_out = q(s)
+            q_a = q_out.gather(1, a.long())
+            max_action = q(s_prime).max(1)[1].unsqueeze(1)
+            # Get Q-value for best action
+            max_q_prime = q_target(s_prime).gather(1, max_action)
+            target = r + gamma * max_q_prime * done_mask
+            loss = F.smooth_l1_loss(q_a, target)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+        writer.add_scalar("Q-Values/Q_Network", q(s).mean().item(), n_episode)
+        writer.add_scalar("Q-Values/Q_Target_Network", q_target(s).mean().item(), n_episode)
+
+        return loss
+    else:
+        for i in range(train_times):
+            # sample from memory, which is not from the most recent runs
+            # but from all previous runs in the memory, so you can be
+            # more sample efficient, because you continuously learn from
+            # past situations
+            # key advantage of Off-policy
+            s,a,r,s_prime,done_mask = memory.sample(batch_size)
+            # the torch size is [batch_size, rows, cols], ie batch_first
+            # print("DQN train --> s.size = ", s.size())
+            # print(s)
+            # print("DQN train --> r.size = ", r.size())
+            # print(r)
+
+            # forward once to q
+            q_out = q(s)
+            q_a = q_out.gather(1,a.long())
+            # forward another time for q_target
+            max_q_prime = q_target(s_prime).max(1)[0].unsqueeze(1)
+            # calculate the target value
+            # if environment is done, there is no future reward,
+            # mask the final step reward with done_mask (0.0 if done else 1.0)
+            target = r + gamma * max_q_prime * done_mask
+            # L1 loss but smoothed out a bit
+            loss = F.smooth_l1_loss(q_a, target)
+            # we will try to improve on Q(s,a)
+            # how well our Q-function is at guessing the future long-term rewards
+            # Q_targ() is the target Q network, a 2nd NN to stablize training
+            # Q(s,a) = R(s,a) + γ*Q_targ(s_prime)*done_mask
+            optimizer.zero_grad()
+            loss.backward()
+            # clip the policy_net.parameters()
+            # Dec05 2021 found it did not work...
+            # for param in q.parameters():
+            #     param.grad.data.clamp_(-1, 1)
+            optimizer.step()
+        writer.add_scalar("Q-Values/Q_Network", q(s).mean().item(), n_episode)
+        writer.add_scalar("Q-Values/Q_Target_Network", q_target(s).mean().item(), n_episode)
+        return loss
