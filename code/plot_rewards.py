@@ -4,7 +4,7 @@ from matplotlib import ticker
 from matplotlib.ticker import (MultipleLocator, AutoMinorLocator, MaxNLocator)
 
 
-def plot_moving_avg(scores, n=500, mode="show", save_path=""):
+def plot_moving_avg(scores,writer, n=500, mode="show", save_path=""):
     print("means = ", scores.mean())
 
     # useful utility function for graphing the average
@@ -13,9 +13,15 @@ def plot_moving_avg(scores, n=500, mode="show", save_path=""):
         ret[n:] = ret[n:] - ret[:-n]
         return ret[n - 1:] / n
 
-    plt.plot(moving_average(scores, n=n))
+    moving_avg_scores = moving_average(scores, n=n)
+
+    # Log moving average rewards to TensorBoard
+    for i, value in enumerate(moving_avg_scores):
+        writer.add_scalar("Rewards/Moving_Avg", value, i + n)
+
     # plt.plot(moving_average(opt_scores, n=500))
     # plt.plot(moving_average(rand_scores, n=500))
+    plt.plot(moving_avg_scores)
     if mode == "show":
         plt.show()
     elif mode == "save":
@@ -38,7 +44,7 @@ def log_rewards_frequency(rewards_all_episodes):
         print(np.asarray((unique_elements, counts_elements)))
 
 
-def plot_rewards_histogram(rewards_all_episodes, mode="show", save_path="", config_str=""):
+def plot_rewards_histogram(rewards_all_episodes,writer, mode="show", save_path="", config_str=""):
     # plot the histogram of rewards_all_episodes
     # number of bins derived from https://stackoverflow.com/questions/30112420/histogram-for-discrete-values-with-matplotlib
     data = rewards_all_episodes
@@ -66,6 +72,7 @@ def plot_rewards_histogram(rewards_all_episodes, mode="show", save_path="", conf
         density=True,
         facecolor='g',
     )
+    writer.add_histogram("Rewards/Histogram", rewards_all_episodes, global_step=len(rewards_all_episodes))
 
     # Make a plot with major ticks that are multiples of 20 and minor ticks that
     # are multiples of 5.  Label major ticks with '.0f' formatting but don't label
@@ -95,7 +102,7 @@ def plot_rewards_histogram(rewards_all_episodes, mode="show", save_path="", conf
     plt.close()
 
 
-def plot_print_rewards_stats(rewards_all_episodes,
+def plot_print_rewards_stats(rewards_all_episodes,writer,
                              show_every,
                              args,
                              mode="show",
@@ -118,6 +125,9 @@ def plot_print_rewards_stats(rewards_all_episodes,
 
     print("\n********Stats per {} episodes********\n".format(show_every))
     for r in rewards_per_N_episodes:
+        avg_reward = sum(r) / show_every
+        min_reward = min(r)
+        max_reward = max(r)
         # print(count, "avg: ", str(sum(r/show_every)))
         # print(count, "min: ", str(min(r)))
         # print(count, "max: ", str(max(r)))
@@ -126,6 +136,10 @@ def plot_print_rewards_stats(rewards_all_episodes,
         aggr_ep_rewards['avg'].append(sum(r/show_every))
         aggr_ep_rewards['min'].append(min(r))
         aggr_ep_rewards['max'].append(max(r))
+
+        writer.add_scalar("Rewards/Average", avg_reward, count)
+        writer.add_scalar("Rewards/Min", min_reward, count)
+        writer.add_scalar("Rewards/Max", max_reward, count)
 
         count += show_every
 
