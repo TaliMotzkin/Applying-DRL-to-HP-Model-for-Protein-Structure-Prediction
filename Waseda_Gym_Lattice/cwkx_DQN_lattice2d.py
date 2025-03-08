@@ -1,4 +1,7 @@
 import argparse
+from torch.utils.tensorboard import SummaryWriter
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 # import csv
 import gym
 import random
@@ -53,7 +56,6 @@ from annealing_schedule import (
 )
 from early_stop import get_F_patterns, seq_parity_stats, early_stop_S_B
 
-
 # ***** set up the lattice 2d env *****
 # parse CMD arguments
 # Parameters starting with - or -- are usually considered optional
@@ -79,6 +81,11 @@ parser.add_argument(
     "use_early_stop",
     type=int,  # 0 is False, 1 is True
 )
+
+parser.add_argument(
+    "double",
+    type=int,
+)
 args = parser.parse_args()
 
 seq = args.seq.upper()  # Our input sequence
@@ -86,6 +93,7 @@ seed = args.seed  # read the seed from CMD
 algo = args.algo  # path to save the experiments
 num_episodes = args.num_episodes  # number of episodes
 use_early_stop = args.use_early_stop  # whether to use early stop
+double = args.double
 
 base_dir = f"./{datetime.datetime.now().strftime('%m%d-%H%M')}-"
 # construct subdir with seq and seed
@@ -100,7 +108,7 @@ else:
     save_fig = False
 
 # for local optima inspection
-local_optima = {21, 23}  # set of local optimas to inspect
+local_optima = {10, 14}  # set of local optimas to inspect
 optima_idx = {}  # for env.render() r_max, count local optima index
 optima_actions_set = {}
 for lo in local_optima:
@@ -114,6 +122,7 @@ for lo in local_optima:
     if not os.path.exists(os.path.join(save_path, f"Score_{lo}")):
         os.makedirs(os.path.join(save_path, f"Score_{lo}"))
 
+
 # Redirect 'print' output to a file in python
 orig_stdout = sys.stdout
 f = open(save_path + 'out.txt', 'w')
@@ -124,7 +133,7 @@ from functools import partial
 print = partial(print, flush=True)
 
 # log the system hostname
-print("os.uname() = ", os.uname())
+# print("os.uname() = ", os.uname())
 
 print("args parse seq = ", seq)
 print("args parse seed = ", seed)
@@ -228,7 +237,7 @@ action_depth = 4  # 0,1,2,3 in observation_box
 energy_depth = 0  # state_E and step_E
 # one hot the HP seq
 seq_bin_arr = np.asarray([1 if x == 'H' else 0 for x in seq])
-seq_one_hot = F.one_hot(torch.from_numpy(seq_bin_arr), num_classes=hp_depth)
+seq_one_hot = F.one_hot(torch.from_numpy(seq_bin_arr).long(), num_classes=hp_depth)
 seq_one_hot = seq_one_hot.numpy()
 # print(f"seq({seq})'s one_hot = ")
 # print(seq_one_hot)
@@ -243,7 +252,7 @@ def one_hot_state(state_arr, seq_one_hot, action_depth):
     """
     state_arr = np.concatenate((first_two_actions, state_arr))
     # print("after catting first_two_actions, state_arr = ", state_arr, state_arr.dtype, state_arr.shape)
-    state_arr = F.one_hot(torch.from_numpy(state_arr), num_classes=action_depth)
+    state_arr = F.one_hot(torch.from_numpy(state_arr).long(), num_classes=action_depth)
     state_arr = state_arr.numpy()  # q.sample_action expects numpy arr
     # print("one-hot first_two_actions catted state = ")
     # print(state_arr)
@@ -379,9 +388,10 @@ for var_name in optimizer.state_dict():
 # time the experiment
 start_time = time()
 time_log("Start RL Program")
+writer = SummaryWriter(log_dir=f"{save_path}/tensorboard_logs")
 
 for n_episode in range(num_episodes):
-    # print("\nEpisode: ", n_episode)
+    print("\nEpisode: ", n_episode)
 
     # only render the game every once a while
     if (n_episode == 0) or ((n_episode+1) % show_every == 0):
@@ -446,7 +456,8 @@ for n_episode in range(num_episodes):
     early_stopped = False
     # whether to avoid F in the next step?
     avoid_F = False
-
+    total_loss = 0
+    step_count = 0
     for step in range(max_steps_per_episode):
         # print(f"--- Ep{n_episode} new step-{step}")
         # sample the action from Q
@@ -480,6 +491,7 @@ for n_episode in range(num_episodes):
             # print("retried action = ", a)
             # Take the action (a) and observe the outcome state(s') and reward (r)
             s_prime, r, done, info = env.step(a)
+
             # print(f"s_prime: {s_prime}, reward: {r}, done: {done}, info: {info}")
 
         # Only keep first turn of Left
@@ -590,9 +602,11 @@ for n_episode in range(num_episodes):
     # start training after 2000 (for eg) can get a wider distribution
     # print("memory.size() = ", memory.size())
     if memory.size()>mem_start_train:
-        train(q, q_target, memory, optimizer)
+        loss_train = train(writer, n_episode,q, q_target, memory, optimizer, double)
+        total_loss += loss_train.item()
+        step_count+=1
 
-    # Update the target network, copying all weights and biases in DQN
+        # Update the target network, copying all weights and biases in DQN
     if n_episode % TARGET_UPDATE == 0:
         q_target.load_state_dict(q.state_dict())
 
@@ -615,6 +629,16 @@ for n_episode in range(num_episodes):
             # print("optima_idx = ", optima_idx)
             # print("optima_actions_set = ", optima_actions_set)
     # Add current episode reward to total rewards list
+
+    avg_loss = total_loss / max(1, step_count)
+    writer.add_scalar("score_sum/Episode", score, n_episode)
+    writer.add_scalar("loss/Episode", avg_loss, n_episode)
+    writer.add_scalar("epsilon/Episode", epsilon, n_episode)
+
+    writer.add_scalar("Trapped/Episode", num_trapped, n_episode)
+    writer.add_scalar("Max_Reward_in_all_episodes", reward_max, n_episode)
+
+
     rewards_all_episodes[n_episode] = score
     # update max reward found so far
     if score > reward_max:
@@ -657,16 +681,16 @@ torch.save(q.state_dict(), f'{save_path}{config_str}-state_dict.pth')
 
 # ***** plot the stats and save in save_path *****
 
-plot_moving_avg(rewards_all_episodes, mode=display_mode, save_path=save_path)
+plot_moving_avg(rewards_all_episodes, writer,mode=display_mode, save_path=save_path)
 log_rewards_frequency(rewards_all_episodes)
 plot_rewards_histogram(
-    rewards_all_episodes,
+    rewards_all_episodes,writer,
     mode=display_mode,
     save_path=save_path,
     config_str=config_str,
 )
 plot_print_rewards_stats(
-    rewards_all_episodes,
+    rewards_all_episodes,writer,
     show_every,
     args,
     mode=display_mode,
@@ -674,7 +698,7 @@ plot_print_rewards_stats(
 )
 
 env.close()
-
+writer.close()
 print("optima_idx = ", optima_idx)
 print("optima_actions_set = ", optima_actions_set)
 
