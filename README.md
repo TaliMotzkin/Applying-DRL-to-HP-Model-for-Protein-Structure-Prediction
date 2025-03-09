@@ -80,8 +80,8 @@ After installation, go to `Waseda_Gym_Lattice/cwkx_DQN_lattice2d.py`
 ```sh
 cd Waseda_Gym_Lattice
 
-# usage: cwkx_DQN_lattice2d.py [seq] [seed] [algo] [num_episodes] [use_early_stop]..
-CUDA_VISIBLE_DEVICES=0 nohup python3 cwkx_DQN_lattice2d.py hhphphphphhhhphppphppphpppphppphppphphhhhphphphphh 42 50mer-DQN-Seed42-600K 600000 0 &
+# usage: cwkx_DQN_lattice2d.py [seq] [seed] [algo] [num_episodes] [use_early_stop] [double dqn]..
+CUDA_VISIBLE_DEVICES=0 nohup python3 cwkx_DQN_lattice2d.py hhphphphphhhhphppphppphpppphppphppphphhhhphphphphh 42 50mer-DQN-Seed42-600K 600000 0 1 &
 ```
 
 #### DQN configurations
